@@ -1,7 +1,10 @@
 package docanalysis
 
 import (
+	"bytes"
 	"fmt"
+	"image/jpeg"
+	"io"
 	"path"
 	"strings"
 
@@ -10,17 +13,23 @@ import (
 
 	"baliance.com/gooxml/document"
 	"baliance.com/gooxml/presentation"
+
+	"github.com/unidoc/unidoc/pdf/extractor"
+	pdf "github.com/unidoc/unidoc/pdf/model"
 )
 
 // Document 文档
 type Document struct {
-	File string
+	File io.ReaderAt
+	Name string
+	Size int64
 }
 
 // Image Image
 type Image struct {
 	Path string
 	Ex   string
+	Body []byte
 }
 
 func (i *Image) String() string {
@@ -48,7 +57,7 @@ func getImages(imgs []common.ImageRef) []*Image {
 }
 
 func (d *Document) docx() (images []*Image, text string, err error) {
-	doc, e := document.Open(d.File)
+	doc, e := document.Read(d.File, d.Size)
 	if e != nil {
 		return nil, "", e
 	}
@@ -81,7 +90,7 @@ func (d *Document) docx() (images []*Image, text string, err error) {
 }
 
 func (d *Document) xlsx() (images []*Image, text string, err error) {
-	xls, e := spreadsheet.Open(d.File)
+	xls, e := spreadsheet.Read(d.File, d.Size)
 	if e != nil {
 		return nil, "", e
 	}
@@ -118,47 +127,98 @@ func (d *Document) xlsx() (images []*Image, text string, err error) {
 }
 
 func (d *Document) pptx() (images []*Image, text string, err error) {
-	ppt, e := presentation.Open(d.File)
+	ppt, e := presentation.Read(d.File, d.Size)
 	if e != nil {
 		return nil, "", e
 	}
 
 	// 图像
 	images = getImages(ppt.Images)
+	return
+}
 
-	// Slides
-	// fmt.Println("Slides", len(ppt.Slides()))
-	// for _, slide := range ppt.Slides() {
-	// 	for _, ph := range slide.PlaceHolders() {
-	// 		for _, para := range ph.Paragraphs() {
-	// 			fmt.Println(para.Properties())
-	// 		}
-	// 	}
-	// }
+func (d *Document) pdf() (images []*Image, text string, err error) {
+	readSeeker := io.NewSectionReader(d.File, 0, d.Size)
+	pdfReader, err := pdf.NewPdfReader(readSeeker)
+	if err != nil {
+		return nil, "", err
+	}
 
-	// // SlideLayouts
-	// fmt.Println("SlideLayouts", len(ppt.SlideLayouts()))
-	// for _, slide := range ppt.SlideLayouts() {
-	// 	fmt.Println(slide.Name())
-	// }
+	// pdf 是否加密
+	isEncrypted, err := pdfReader.IsEncrypted()
+	if err != nil {
+		return nil, "", fmt.Errorf("pdf is encrypted err: %v", err)
+	} else if isEncrypted {
+		return nil, "", fmt.Errorf("pdf is encrypted")
+	}
 
+	pages, err := pdfReader.GetNumPages()
+	if err != nil {
+		return nil, "", fmt.Errorf("pdf get page nums err: %v", err)
+	}
+
+	for pageNum := 1; pageNum <= pages; pageNum++ {
+		page, e := pdfReader.GetPage(pageNum)
+		if e != nil {
+			return nil, "", fmt.Errorf("pdf get page err: %v", e)
+		}
+
+		ex, err := extractor.New(page)
+		if err != nil {
+			return nil, "", fmt.Errorf("pdf new ext err: %v", err)
+		}
+
+		tmpText, err := ex.ExtractText()
+		if err != nil {
+			return nil, "", fmt.Errorf("pdf ext text err: %v", err)
+		}
+		text += tmpText
+
+		// 检测本页图片
+		rgbImages, err := extractImagesOnPage(page)
+		if err != nil {
+			return nil, "", fmt.Errorf("pdf ext image err: %v", err)
+		}
+
+		for _, img := range rgbImages {
+			gimg, err := img.ToGoImage()
+			if err != nil {
+				return nil, "", fmt.Errorf("pdf img2goimg err: %v", err)
+			}
+			buffer := bytes.NewBuffer([]byte{})
+			opt := jpeg.Options{Quality: 100}
+			err = jpeg.Encode(buffer, gimg, &opt)
+			if err != nil {
+				return nil, "", fmt.Errorf("pdf img to jpeg err: %v", err)
+			}
+
+			images = append(images, &Image{
+				Path: "",
+				Ex:   "jpeg",
+				Body: buffer.Bytes(),
+			})
+		}
+	}
 	return
 }
 
 // Analysis 执行解析
 func (d *Document) Analysis() (images []*Image, text string, err error) {
-	if d == nil || len(d.File) == 0 {
+	if d == nil || d.File == nil || len(d.Name) == 0 {
 		return nil, "", ErrNoFile
 	}
-	if strings.HasSuffix(d.File, ".doc") ||
-		strings.HasSuffix(d.File, ".docx") {
+
+	if strings.HasSuffix(d.Name, ".doc") ||
+		strings.HasSuffix(d.Name, ".docx") {
 		return d.docx()
-	} else if strings.HasSuffix(d.File, ".ppt") ||
-		strings.HasSuffix(d.File, ".pptx") {
+	} else if strings.HasSuffix(d.Name, ".ppt") ||
+		strings.HasSuffix(d.Name, ".pptx") {
 		return d.pptx()
-	} else if strings.HasSuffix(d.File, "xls") ||
-		strings.HasSuffix(d.File, "xlsx") {
+	} else if strings.HasSuffix(d.Name, "xls") ||
+		strings.HasSuffix(d.Name, "xlsx") {
 		return d.xlsx()
+	} else if strings.HasSuffix(d.Name, "pdf") {
+		return d.pdf()
 	}
 
 	return nil, "", ErrNoSupport
