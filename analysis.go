@@ -5,8 +5,11 @@ import (
 	"fmt"
 	"image/jpeg"
 	"io"
+	"io/ioutil"
 	"path"
 	"strings"
+
+	"code.sajari.com/docconv"
 
 	"baliance.com/gooxml/common"
 	"baliance.com/gooxml/spreadsheet"
@@ -14,13 +17,13 @@ import (
 	"baliance.com/gooxml/document"
 	"baliance.com/gooxml/presentation"
 
-	"github.com/unidoc/unidoc/pdf/extractor"
+	"github.com/extrame/xls"
 	pdf "github.com/unidoc/unidoc/pdf/model"
 )
 
 // Document 文档
 type Document struct {
-	File io.ReaderAt
+	File *bytes.Reader
 	Name string
 	Size int64
 }
@@ -36,15 +39,6 @@ func (i *Image) String() string {
 	return fmt.Sprintf("%s.%s", i.Path, i.Ex)
 }
 
-func paragraphs(pg []document.Paragraph) (text string) {
-	for _, para := range pg {
-		for _, run := range para.Runs() {
-			text += run.Text()
-		}
-	}
-	return
-}
-
 func getImages(imgs []common.ImageRef) []*Image {
 	tmpImage := make([]*Image, len(imgs))
 	for index, img := range imgs {
@@ -56,37 +50,62 @@ func getImages(imgs []common.ImageRef) []*Image {
 	return tmpImage
 }
 
-func (d *Document) docx() (images []*Image, text string, err error) {
-	doc, e := document.Read(d.File, d.Size)
+func (d *Document) text() (string, error) {
+	mime := docconv.MimeTypeByExtension(d.Name)
+	resp, e := docconv.Convert(d.File, mime, true)
 	if e != nil {
-		return nil, "", e
+		return "", fmt.Errorf("convert %v error: %v", mime, e)
+	}
+	return resp.Body, nil
+}
+
+func (d *Document) doc() (images []*Image, text string, err error) {
+	text, err = d.text()
+	if err != nil {
+		return nil, "", err
 	}
 
-	// 页脚
-	for _, footer := range doc.Footers() {
-		text += paragraphs(footer.Paragraphs())
+	return nil, text, err
+}
+
+func (d *Document) docx() (images []*Image, text string, err error) {
+	text, err = d.text()
+	if err != nil {
+		return nil, "", err
 	}
 
-	// 页眉
-	for _, header := range doc.Headers() {
-		text += paragraphs(header.Paragraphs())
+	doc, e := document.Read(d.File, d.Size)
+	if e == nil {
+		// 图像
+		images = getImages(doc.Images)
+	}
+	return
+}
+
+func (d *Document) xls() (images []*Image, text string, err error) {
+	xlFile, e := xls.OpenReader(d.File, "utf-8")
+	if e != nil {
+		return nil, "", fmt.Errorf("read xls err: %v", e)
 	}
 
-	// 段落、正文
-	text += paragraphs(doc.Paragraphs())
+	var body strings.Builder
+	for i := 0; i < xlFile.NumSheets(); i++ {
+		sheet := xlFile.GetSheet(i)
+		body.WriteString(sheet.Name)
 
-	// 图像
-	images = getImages(doc.Images)
-
-	// 图表
-	for _, table := range doc.Tables() {
-		for _, row := range table.Rows() {
-			for _, cell := range row.Cells() {
-				text += paragraphs(cell.Paragraphs())
+		for j := 0; j < int(sheet.MaxRow); j++ {
+			if sheet.Row(j) == nil {
+				continue
+			}
+			row := sheet.Row(j)
+			for index := row.FirstCol(); index < row.LastCol(); index++ {
+				if row.Col(index) != "" {
+					body.WriteString(row.Col(index))
+				}
 			}
 		}
 	}
-	return
+	return nil, body.String(), nil
 }
 
 func (d *Document) xlsx() (images []*Image, text string, err error) {
@@ -138,58 +157,60 @@ func (d *Document) pptx() (images []*Image, text string, err error) {
 }
 
 func (d *Document) pdf() (images []*Image, text string, err error) {
-	readSeeker := io.NewSectionReader(d.File, 0, d.Size)
-	pdfReader, err := pdf.NewPdfReader(readSeeker)
+	text, err = d.text()
 	if err != nil {
 		return nil, "", err
+	}
+
+	// get img
+	readSeeker := io.NewSectionReader(d.File, 0, d.Size)
+	pdfReader, e := pdf.NewPdfReader(readSeeker)
+	if e != nil {
+		return nil, text, nil
 	}
 
 	// pdf 是否加密
 	isEncrypted, err := pdfReader.IsEncrypted()
 	if err != nil {
-		return nil, "", fmt.Errorf("pdf is encrypted err: %v", err)
+		return nil, text, nil
 	} else if isEncrypted {
-		return nil, "", fmt.Errorf("pdf is encrypted")
+		return nil, text, nil
 	}
 
 	pages, err := pdfReader.GetNumPages()
 	if err != nil {
-		return nil, "", fmt.Errorf("pdf get page nums err: %v", err)
+		return nil, text, nil
 	}
 
-	for pageNum := 1; pageNum <= pages; pageNum++ {
+	// pagenum 从第二页开始
+	// 第一页数据会在ocr中处理
+	// 所以跳过第一页
+	for pageNum := 2; pageNum <= pages; pageNum++ {
 		page, e := pdfReader.GetPage(pageNum)
 		if e != nil {
-			return nil, "", fmt.Errorf("pdf get page err: %v", e)
+			continue
 		}
-
-		ex, err := extractor.New(page)
-		if err != nil {
-			return nil, "", fmt.Errorf("pdf new ext err: %v", err)
-		}
-
-		tmpText, err := ex.ExtractText()
-		if err != nil {
-			return nil, "", fmt.Errorf("pdf ext text err: %v", err)
-		}
-		text += tmpText
 
 		// 检测本页图片
 		rgbImages, err := extractImagesOnPage(page)
 		if err != nil {
-			return nil, "", fmt.Errorf("pdf ext image err: %v", err)
+			// 如果图片解析错误，直接跳过
+			continue
+			// return nil, "", fmt.Errorf("pdf ext image err: %v", err)
 		}
 
 		for _, img := range rgbImages {
 			gimg, err := img.ToGoImage()
 			if err != nil {
-				return nil, "", fmt.Errorf("pdf img2goimg err: %v", err)
+				continue
+				// return nil, "", fmt.Errorf("pdf img2goimg err: %v", err)
 			}
 			buffer := bytes.NewBuffer([]byte{})
 			opt := jpeg.Options{Quality: 100}
 			err = jpeg.Encode(buffer, gimg, &opt)
 			if err != nil {
-				return nil, "", fmt.Errorf("pdf img to jpeg err: %v", err)
+				continue
+				// return nil, "", fmt.Errorf("pdf img to jpeg err: %v", err)
 			}
 
 			images = append(images, &Image{
@@ -208,17 +229,27 @@ func (d *Document) Analysis() (images []*Image, text string, err error) {
 		return nil, "", ErrNoFile
 	}
 
-	if strings.HasSuffix(d.Name, ".doc") ||
-		strings.HasSuffix(d.Name, ".docx") {
+	switch path.Ext(d.Name) {
+	case ".txt":
+		body, e := ioutil.ReadAll(d.File)
+		if e != nil {
+			return nil, "", fmt.Errorf("read file err: %v", e)
+		}
+		return nil, string(body), nil
+	case ".xml", ".htm", ".html", ".doc":
+		return d.doc()
+	case ".docx":
 		return d.docx()
-	} else if strings.HasSuffix(d.Name, ".ppt") ||
-		strings.HasSuffix(d.Name, ".pptx") {
+	case ".pptx":
 		return d.pptx()
-	} else if strings.HasSuffix(d.Name, "xls") ||
-		strings.HasSuffix(d.Name, "xlsx") {
+	case ".xls":
+		return d.xls()
+	case ".xlsx":
 		return d.xlsx()
-	} else if strings.HasSuffix(d.Name, "pdf") {
+	case ".pdf":
 		return d.pdf()
+	default:
+
 	}
 
 	return nil, "", ErrNoSupport
