@@ -1,8 +1,6 @@
 package docanalysis
 
 import (
-	"fmt"
-
 	pdfcontent "github.com/unidoc/unidoc/pdf/contentstream"
 	pdfcore "github.com/unidoc/unidoc/pdf/core"
 	pdf "github.com/unidoc/unidoc/pdf/model"
@@ -25,6 +23,7 @@ func extractImagesInContentStream(contents string, resources *pdf.PdfPageResourc
 		return nil, err
 	}
 
+	rgbColorSpace := pdf.NewPdfColorspaceDeviceRGB()
 	processedXObjects := map[string]bool{}
 
 	// Range through all the content stream operations.
@@ -42,22 +41,12 @@ func extractImagesInContentStream(contents string, resources *pdf.PdfPageResourc
 				return nil, err
 			}
 
-			cs, err := iimg.GetColorSpace(resources)
-			if err != nil {
-				return nil, err
-			}
-			if cs == nil {
-				// Default if not specified?
-				cs = pdf.NewPdfColorspaceDeviceGray()
-			}
-			fmt.Printf("Cs: %T\n", cs)
-
-			rgbImg, err := cs.ImageToRGB(*img)
+			grayImg, err := rgbColorSpace.ImageToGray(*img)
 			if err != nil {
 				return nil, err
 			}
 
-			rgbImages = append(rgbImages, &rgbImg)
+			rgbImages = append(rgbImages, &grayImg)
 		} else if op.Operand == "Do" && len(op.Params) == 1 {
 			// Do: XObject.
 			name := op.Params[0].(*pdfcore.PdfObjectName)
@@ -71,8 +60,6 @@ func extractImagesInContentStream(contents string, resources *pdf.PdfPageResourc
 
 			_, xtype := resources.GetXObjectByName(*name)
 			if xtype == pdf.XObjectTypeImage {
-				fmt.Printf(" XObject Image: %s\n", *name)
-
 				ximg, err := resources.GetXObjectImageByName(*name)
 				if err != nil {
 					return nil, err
@@ -82,12 +69,11 @@ func extractImagesInContentStream(contents string, resources *pdf.PdfPageResourc
 				if err != nil {
 					return nil, err
 				}
-
-				rgbImg, err := ximg.ColorSpace.ImageToRGB(*img)
+				grayImg, err := rgbColorSpace.ImageToGray(*img)
 				if err != nil {
 					return nil, err
 				}
-				rgbImages = append(rgbImages, &rgbImg)
+				rgbImages = append(rgbImages, &grayImg)
 			} else if xtype == pdf.XObjectTypeForm {
 				// Go through the XObject Form content stream.
 				xform, err := resources.GetXObjectFormByName(*name)

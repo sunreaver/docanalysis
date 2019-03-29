@@ -3,7 +3,6 @@ package docanalysis
 import (
 	"bytes"
 	"fmt"
-	"image/jpeg"
 	"io"
 	"io/ioutil"
 	"path"
@@ -18,6 +17,7 @@ import (
 	"baliance.com/gooxml/presentation"
 
 	"github.com/extrame/xls"
+	"github.com/pixiv/go-libjpeg/jpeg"
 	pdf "github.com/unidoc/unidoc/pdf/model"
 )
 
@@ -32,7 +32,7 @@ type Document struct {
 type Image struct {
 	Path string
 	Ex   string
-	Body []byte
+	Body *bytes.Buffer
 }
 
 func (i *Image) String() string {
@@ -205,18 +205,21 @@ func (d *Document) pdf() (images []*Image, text string, err error) {
 				continue
 				// return nil, "", fmt.Errorf("pdf img2goimg err: %v", err)
 			}
+
 			buffer := bytes.NewBuffer([]byte{})
-			opt := jpeg.Options{Quality: 100}
-			err = jpeg.Encode(buffer, gimg, &opt)
+			err = jpeg.Encode(buffer, gimg, &jpeg.EncoderOptions{
+				Quality:         50,
+				OptimizeCoding:  true,
+				ProgressiveMode: true,
+			})
 			if err != nil {
 				continue
 				// return nil, "", fmt.Errorf("pdf img to jpeg err: %v", err)
 			}
 
 			images = append(images, &Image{
-				Path: "",
-				Ex:   "jpeg",
-				Body: buffer.Bytes(),
+				Ex:   "jpg",
+				Body: buffer,
 			})
 		}
 	}
