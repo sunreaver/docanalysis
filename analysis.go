@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"os"
 	"path"
 	"strings"
 
@@ -39,13 +40,25 @@ func (i *Image) String() string {
 	return fmt.Sprintf("%s.%s", i.Path, i.Ex)
 }
 
-func getImages(imgs []common.ImageRef) []*Image {
-	tmpImage := make([]*Image, len(imgs))
-	for index, img := range imgs {
-		tmpImage[index] = &Image{
+func getImages(imgs []common.ImageRef, opt *Options) []*Image {
+	var tmpImage []*Image
+	for _, img := range imgs {
+		if len(tmpImage) >= opt.MaxImageCount {
+			break
+		}
+
+		stat, e := os.Stat(img.Path())
+		if e != nil {
+			continue
+		}
+		if stat.Size() < opt.ImageMinSize {
+			continue
+		}
+
+		tmpImage = append(tmpImage, &Image{
 			Path: img.Path(),
 			Ex:   img.Format(),
-		}
+		})
 	}
 	return tmpImage
 }
@@ -59,7 +72,7 @@ func (d *Document) text() (string, error) {
 	return resp.Body, nil
 }
 
-func (d *Document) doc() (images []*Image, text string, err error) {
+func (d *Document) doc(_ *Options) (images []*Image, text string, err error) {
 	text, err = d.text()
 	if err != nil {
 		return nil, "", err
@@ -68,7 +81,7 @@ func (d *Document) doc() (images []*Image, text string, err error) {
 	return nil, text, err
 }
 
-func (d *Document) docx() (images []*Image, text string, err error) {
+func (d *Document) docx(opt *Options) (images []*Image, text string, err error) {
 	text, err = d.text()
 	if err != nil {
 		return nil, "", err
@@ -77,12 +90,12 @@ func (d *Document) docx() (images []*Image, text string, err error) {
 	doc, e := document.Read(d.File, d.Size)
 	if e == nil {
 		// 图像
-		images = getImages(doc.Images)
+		images = getImages(doc.Images, opt)
 	}
 	return
 }
 
-func (d *Document) xls() (images []*Image, text string, err error) {
+func (d *Document) xls(_ *Options) (images []*Image, text string, err error) {
 	xlFile, e := xls.OpenReader(d.File, "utf-8")
 	if e != nil {
 		return nil, "", fmt.Errorf("read xls err: %v", e)
@@ -108,7 +121,7 @@ func (d *Document) xls() (images []*Image, text string, err error) {
 	return nil, body.String(), nil
 }
 
-func (d *Document) xlsx() (images []*Image, text string, err error) {
+func (d *Document) xlsx(_ *Options) (images []*Image, text string, err error) {
 	xls, e := spreadsheet.Read(d.File, d.Size)
 	if e != nil {
 		return nil, "", e
@@ -145,47 +158,52 @@ func (d *Document) xlsx() (images []*Image, text string, err error) {
 	return
 }
 
-func (d *Document) pptx() (images []*Image, text string, err error) {
+func (d *Document) pptx(opt *Options) (images []*Image, text string, err error) {
 	ppt, e := presentation.Read(d.File, d.Size)
 	if e != nil {
 		return nil, "", e
 	}
 
 	// 图像
-	images = getImages(ppt.Images)
+	images = getImages(ppt.Images, opt)
 	return
 }
 
-func (d *Document) pdf() (images []*Image, text string, err error) {
-	text, err = d.text()
-	if err != nil {
-		return nil, "", err
-	}
-
+func (d *Document) pdf(opt *Options) (images []*Image, text string, err error) {
 	// get img
 	readSeeker := io.NewSectionReader(d.File, 0, d.Size)
 	pdfReader, e := pdf.NewPdfReader(readSeeker)
 	if e != nil {
-		return nil, text, nil
+		return nil, "", fmt.Errorf("read pdf err: %v", e)
 	}
 
 	// pdf 是否加密
 	isEncrypted, err := pdfReader.IsEncrypted()
 	if err != nil {
-		return nil, text, nil
+		return nil, "", fmt.Errorf("check pdf is_encrypted err: %v", e)
 	} else if isEncrypted {
-		return nil, text, nil
+		return nil, "", fmt.Errorf("pdf is_encrypted")
 	}
 
 	pages, err := pdfReader.GetNumPages()
 	if err != nil {
-		return nil, text, nil
+		return nil, "", fmt.Errorf("get pdf page_num err: %v", pages)
+	} else if pages <= opt.SkipPDFWithNumPages {
+		return nil, "", fmt.Errorf("pdf pages too less: %v/%v", pages, opt.SkipPDFWithNumPages)
 	}
 
-	// pagenum 从第二页开始
-	// 第一页数据会在ocr中处理
-	// 所以跳过第一页
-	for pageNum := 2; pageNum <= pages; pageNum++ {
+	imgPagesNum := 0
+	maxImagePageCount := opt.ReadTextWithImageProportion * float64(pages)
+	needReadText := true
+
+	for pageNum := int(opt.SkipPDFWithNumPages) + 1; pageNum <= pages; pageNum++ {
+		if !needReadText && len(images) >= opt.MaxImageCount {
+			// 图片已满，且已经检测出不需要text处理
+			// 则直接跳出图片处理逻辑
+			// 因为接下来的所有图片都是无用图片，既不会输出，也不会影响text输出
+			break
+		}
+
 		page, e := pdfReader.GetPage(pageNum)
 		if e != nil {
 			continue
@@ -196,16 +214,14 @@ func (d *Document) pdf() (images []*Image, text string, err error) {
 		if err != nil {
 			// 如果图片解析错误，直接跳过
 			continue
-			// return nil, "", fmt.Errorf("pdf ext image err: %v", err)
 		}
+		hadImg := false
 
 		for _, img := range rgbImages {
 			gimg, err := img.ToGoImage()
 			if err != nil {
 				continue
-				// return nil, "", fmt.Errorf("pdf img2goimg err: %v", err)
 			}
-
 			buffer := bytes.NewBuffer([]byte{})
 			err = jpeg.Encode(buffer, gimg, &jpeg.EncoderOptions{
 				Quality:         50,
@@ -214,22 +230,47 @@ func (d *Document) pdf() (images []*Image, text string, err error) {
 			})
 			if err != nil {
 				continue
-				// return nil, "", fmt.Errorf("pdf img to jpeg err: %v", err)
+			} else if buffer.Len() < int(opt.ImageMinSize) {
+				// 图片大小过滤
+				buffer = nil //gc
+				continue
 			}
 
-			images = append(images, &Image{
-				Ex:   "jpg",
-				Body: buffer,
-			})
+			hadImg = true
+
+			if len(images) < opt.MaxImageCount {
+				images = append(images, &Image{
+					Ex:   "jpg",
+					Body: buffer,
+				})
+			} else {
+				buffer = nil // gc
+			}
+		}
+		if needReadText && hadImg {
+			imgPagesNum++
+			if float64(imgPagesNum) > maxImagePageCount {
+				needReadText = false
+			}
+		}
+	}
+
+	if needReadText {
+		text, err = d.text()
+		if err != nil {
+			return nil, "", err
 		}
 	}
 	return
 }
 
 // Analysis 执行解析
-func (d *Document) Analysis() (images []*Image, text string, err error) {
+func (d *Document) Analysis(opt *Options) (images []*Image, text string, err error) {
 	if d == nil || d.File == nil || len(d.Name) == 0 {
 		return nil, "", ErrNoFile
+	}
+	if opt == nil {
+		opt = &defaultOption
 	}
 
 	switch path.Ext(d.Name) {
@@ -240,17 +281,17 @@ func (d *Document) Analysis() (images []*Image, text string, err error) {
 		}
 		return nil, string(body), nil
 	case ".xml", ".htm", ".html", ".doc":
-		return d.doc()
+		return d.doc(opt)
 	case ".docx":
-		return d.docx()
+		return d.docx(opt)
 	case ".pptx":
-		return d.pptx()
+		return d.pptx(opt)
 	case ".xls":
-		return d.xls()
+		return d.xls(opt)
 	case ".xlsx":
-		return d.xlsx()
+		return d.xlsx(opt)
 	case ".pdf":
-		return d.pdf()
+		return d.pdf(opt)
 	default:
 
 	}
