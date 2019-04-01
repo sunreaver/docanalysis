@@ -51,7 +51,7 @@ func getImages(imgs []common.ImageRef, opt *Options) []*Image {
 		if e != nil {
 			continue
 		}
-		if stat.Size() < opt.ImageMinSize {
+		if stat.Size() < int64(opt.ImageMinSize) {
 			continue
 		}
 

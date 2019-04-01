@@ -5,7 +5,7 @@ type Options struct {
 	// MaxImageCount 最多返回的图片量
 	MaxImageCount int
 	// ImageMinSize 返回图片的大小底限
-	ImageMinSize int64
+	ImageMinSize int
 	// ReadTextWithImageProportion 包含图片的页在总页数中的占比超过此值，则不返回文字
 	ReadTextWithImageProportion float64
 	// SkipPDFWithNumPages 跳过页数以下的pdf文件处理
