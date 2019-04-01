@@ -41,7 +41,19 @@ func extractImagesInContentStream(contents string, resources *pdf.PdfPageResourc
 				return nil, err
 			}
 
-			grayImg, err := rgbColorSpace.ImageToGray(*img)
+			cs, err := iimg.GetColorSpace(resources)
+			if err != nil {
+				return nil, err
+			}
+			if cs == nil {
+				// Default if not specified?
+				cs = pdf.NewPdfColorspaceDeviceGray()
+			}
+			rgbImg, err := cs.ImageToRGB(*img)
+			if err != nil {
+				return nil, err
+			}
+			grayImg, err := rgbColorSpace.ImageToGray(rgbImg)
 			if err != nil {
 				return nil, err
 			}
@@ -69,7 +81,11 @@ func extractImagesInContentStream(contents string, resources *pdf.PdfPageResourc
 				if err != nil {
 					return nil, err
 				}
-				grayImg, err := rgbColorSpace.ImageToGray(*img)
+				rfgImg, err := ximg.ColorSpace.ImageToRGB(*img)
+				if err != nil {
+					return nil, err
+				}
+				grayImg, err := rgbColorSpace.ImageToGray(rfgImg)
 				if err != nil {
 					return nil, err
 				}
