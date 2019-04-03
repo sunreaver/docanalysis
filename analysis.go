@@ -287,6 +287,7 @@ func (d *Document) Analysis(opt *Options) (images []*Image, text string, err err
 	if opt == nil {
 		opt = &defaultOption
 	}
+	opt.Valid()
 	if d.Log == nil {
 		d.Log = defaultLogger
 	}
