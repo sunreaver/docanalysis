@@ -27,6 +27,7 @@ type Document struct {
 	File *bytes.Reader
 	Name string
 	Size int64
+	Log  Logger
 }
 
 // Image Image
@@ -170,6 +171,26 @@ func (d *Document) pptx(opt *Options) (images []*Image, text string, err error) 
 }
 
 func (d *Document) pdf(opt *Options) (images []*Image, text string, err error) {
+	needReadText := true
+	defer func() {
+		var e error
+		if needReadText {
+			text, e = d.text()
+		}
+		// 只有 image/text 读取全部出错，次函数才会返回error
+		if err != nil {
+			d.Log.Errorw("read_pdf_image", "err", err,
+				"file", d.Name)
+			if e == nil {
+				// 文字读取ok，则不返回错误
+				err = nil
+			}
+		}
+		if e != nil {
+			d.Log.Errorw("read_pdf_text", "err", e,
+				"file", d.Name)
+		}
+	}()
 	// get img
 	readSeeker := io.NewSectionReader(d.File, 0, d.Size)
 	pdfReader, e := pdf.NewPdfReader(readSeeker)
@@ -189,12 +210,13 @@ func (d *Document) pdf(opt *Options) (images []*Image, text string, err error) {
 	if err != nil {
 		return nil, "", fmt.Errorf("get pdf page_num err: %v", pages)
 	} else if pages <= opt.SkipPDFWithNumPages {
+		// 页数不符合，不读取text
+		needReadText = false
 		return nil, "", fmt.Errorf("pdf pages too less: %v/%v", pages, opt.SkipPDFWithNumPages)
 	}
 
 	imgPagesNum := 0
 	maxImagePageCount := opt.ReadTextWithImageProportion * float64(pages)
-	needReadText := true
 
 	for pageNum := int(opt.SkipPDFWithNumPages) + 1; pageNum <= pages; pageNum++ {
 		if !needReadText && len(images) >= opt.MaxImageCount {
@@ -254,13 +276,6 @@ func (d *Document) pdf(opt *Options) (images []*Image, text string, err error) {
 			}
 		}
 	}
-
-	if needReadText {
-		text, err = d.text()
-		if err != nil {
-			return nil, "", err
-		}
-	}
 	return
 }
 
@@ -271,6 +286,9 @@ func (d *Document) Analysis(opt *Options) (images []*Image, text string, err err
 	}
 	if opt == nil {
 		opt = &defaultOption
+	}
+	if d.Log == nil {
+		d.Log = defaultLogger
 	}
 
 	switch path.Ext(d.Name) {
