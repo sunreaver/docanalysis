@@ -7,6 +7,7 @@ import (
 	"io/ioutil"
 	"os"
 	"path"
+	"runtime"
 	"strings"
 
 	"code.sajari.com/docconv"
@@ -122,7 +123,7 @@ func (d *Document) xls(_ *Options) (images []*Image, text string, err error) {
 	return nil, body.String(), nil
 }
 
-func (d *Document) xlsx(_ *Options) (images []*Image, text string, err error) {
+func (d *Document) xlsx(o *Options) (images []*Image, text string, err error) {
 	xls, e := spreadsheet.Read(d.File, d.Size)
 	if e != nil {
 		return nil, "", e
@@ -130,11 +131,20 @@ func (d *Document) xlsx(_ *Options) (images []*Image, text string, err error) {
 
 	// 图像
 	for _, ef := range xls.ExtraFiles {
+		if len(images) >= o.MaxImageCount {
+			break
+		}
 		ex := strings.ToLower(path.Ext(ef.ZipPath))
 		if len(ex) > 1 {
 			ex = ex[1:]
 		}
 		if ex != "jpg" && ex != "jpeg" && ex != "png" {
+			continue
+		}
+		stat, e := os.Stat(ef.DiskPath)
+		if e != nil {
+			continue
+		} else if stat.IsDir() || stat.Size() < int64(o.ImageMinSize) {
 			continue
 		}
 		images = append(images, &Image{
@@ -143,18 +153,26 @@ func (d *Document) xlsx(_ *Options) (images []*Image, text string, err error) {
 		})
 	}
 
+	var tmp strings.Builder
 	for _, sheet := range xls.Sheets() {
-		for _, row := range sheet.Rows() {
-			for _, cell := range row.Cells() {
+		for indexRow, row := range sheet.Rows() {
+			if indexRow >= o.ExcelMaxRow {
+				break
+			}
+			for indexCell, cell := range row.Cells() {
+				if indexCell > o.ExcelMaxCellInRow {
+					break
+				}
 				if cell.IsNumber() || cell.IsBool() {
 					continue
 				}
 				if value := cell.GetString(); len(value) != 0 {
-					text += value
+					tmp.WriteString(value)
 				}
 			}
 		}
 	}
+	text = tmp.String()
 
 	return
 }
@@ -281,6 +299,20 @@ func (d *Document) pdf(opt *Options) (images []*Image, text string, err error) {
 
 // Analysis 执行解析
 func (d *Document) Analysis(opt *Options) (images []*Image, text string, err error) {
+	defer func() {
+		if e := recover(); e != nil {
+			var err error
+			switch e := e.(type) {
+			case error:
+				err = e
+			default:
+				err = fmt.Errorf("%v", e)
+			}
+			stack := make([]byte, 1024*2)
+			length := runtime.Stack(stack, true)
+			err = fmt.Errorf("[%v] %v %v", "PANIC RECOVER", err, stack[:length])
+		}
+	}()
 	if d == nil || d.File == nil || len(d.Name) == 0 {
 		return nil, "", ErrNoFile
 	}

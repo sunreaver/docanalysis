@@ -10,6 +10,10 @@ type Options struct {
 	ReadTextWithImageProportion float64
 	// SkipPDFWithNumPages 跳过页数以下的pdf文件处理
 	SkipPDFWithNumPages int
+
+	// ExcelMaxRow excel max row
+	ExcelMaxRow       int
+	ExcelMaxCellInRow int
 }
 
 var defaultOption = Options{
@@ -17,6 +21,8 @@ var defaultOption = Options{
 	ImageMinSize:                32 * 1024,
 	ReadTextWithImageProportion: 0.7,
 	SkipPDFWithNumPages:         0x01 << 16,
+	ExcelMaxRow:                 1000,
+	ExcelMaxCellInRow:           1000,
 }
 
 // Valid Valid
@@ -24,16 +30,22 @@ func (o *Options) Valid() {
 	if o == nil {
 		return
 	}
-	if o.ImageMinSize < 0 {
-		o.ImageMinSize = 0
+	if o.ImageMinSize <= 0 {
+		o.ImageMinSize = defaultOption.ImageMinSize
 	}
 	if o.ReadTextWithImageProportion < 0.0 {
 		o.ReadTextWithImageProportion = 0.0
 	}
-	if o.MaxImageCount <= 0 {
-		o.MaxImageCount = 0
+	if o.MaxImageCount < 0 {
+		o.MaxImageCount = defaultOption.MaxImageCount
 	}
 	if o.SkipPDFWithNumPages < 0 {
 		o.SkipPDFWithNumPages = defaultOption.SkipPDFWithNumPages
+	}
+	if o.ExcelMaxRow <= 0 {
+		o.ExcelMaxRow = defaultOption.ExcelMaxRow
+	}
+	if o.ExcelMaxCellInRow <= 0 {
+		o.ExcelMaxCellInRow = defaultOption.ExcelMaxCellInRow
 	}
 }
