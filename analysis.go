@@ -97,23 +97,22 @@ func (d *Document) docx(opt *Options) (images []*Image, text string, err error) 
 	return
 }
 
-func (d *Document) xls(_ *Options) (images []*Image, text string, err error) {
+func (d *Document) xls(opt *Options) (images []*Image, text string, err error) {
 	xlFile, e := xls.OpenReader(d.File, "utf-8")
 	if e != nil {
 		return nil, "", fmt.Errorf("read xls err: %v", e)
 	}
-
 	var body strings.Builder
-	for i := 0; i < xlFile.NumSheets(); i++ {
+	for i := 0; i < xlFile.NumSheets() && i < opt.ExcelMaxCellInRow; i++ {
 		sheet := xlFile.GetSheet(i)
 		body.WriteString(sheet.Name)
 
-		for j := 0; j < int(sheet.MaxRow); j++ {
+		for j := 0; j < int(sheet.MaxRow) && j < opt.ExcelMaxRow; j++ {
 			if sheet.Row(j) == nil {
 				continue
 			}
 			row := sheet.Row(j)
-			for index := row.FirstCol(); index < row.LastCol(); index++ {
+			for index := row.FirstCol(); index < row.LastCol() && j < opt.ExcelMaxCellInRow; index++ {
 				if row.Col(index) != "" {
 					body.WriteString(row.Col(index))
 				}
@@ -154,7 +153,10 @@ func (d *Document) xlsx(o *Options) (images []*Image, text string, err error) {
 	}
 
 	var tmp strings.Builder
-	for _, sheet := range xls.Sheets() {
+	for indexSheet, sheet := range xls.Sheets() {
+		if indexSheet >= o.ExcelMaxCellInRow {
+			break
+		}
 		for indexRow, row := range sheet.Rows() {
 			if indexRow >= o.ExcelMaxRow {
 				break
@@ -264,9 +266,8 @@ func (d *Document) pdf(opt *Options) (images []*Image, text string, err error) {
 			}
 			buffer := bytes.NewBuffer([]byte{})
 			err = jpeg.Encode(buffer, gimg, &jpeg.EncoderOptions{
-				Quality:         50,
-				OptimizeCoding:  true,
-				ProgressiveMode: true,
+				Quality:        50,
+				OptimizeCoding: true,
 			})
 			if err != nil {
 				continue
