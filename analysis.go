@@ -170,6 +170,7 @@ func (d *Document) xlsx(o *Options) (images []*Image, text string, err error) {
 				}
 				if value := cell.GetString(); len(value) != 0 {
 					tmp.WriteString(value)
+					tmp.WriteByte(',')
 				}
 			}
 		}
