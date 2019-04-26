@@ -151,24 +151,14 @@ func (d *Document) xlsx(o *Options) (images []*Image, text string, err error) {
 			Ex:   ex,
 		})
 	}
-
 	var tmp strings.Builder
-	for indexSheet, sheet := range xls.Sheets() {
-		if indexSheet >= o.ExcelMaxCellInRow {
-			break
-		}
-		for indexRow, row := range sheet.Rows() {
-			if indexRow >= o.ExcelMaxRow {
-				break
-			}
-			for indexCell, cell := range row.Cells() {
-				if indexCell > o.ExcelMaxCellInRow {
-					break
-				}
-				if cell.IsNumber() || cell.IsBool() {
-					continue
-				}
-				if value := cell.GetString(); len(value) != 0 {
+	sheets := xls.Sheets()
+	for indexSheet := 0; indexSheet < len(sheets) && indexSheet <= o.ExcelMaxCellInRow; indexSheet++ {
+		rows := sheets[indexSheet].Rows()
+		for indexRow := 0; indexRow < len(rows) && indexRow <= o.ExcelMaxRow; indexRow++ {
+			cells := rows[indexRow].Cells()
+			for indexCell := 0; indexCell < len(cells) && indexCell <= o.ExcelMaxCellInRow; indexCell++ {
+				if value := cells[indexCell].GetString(); len(value) != 0 {
 					tmp.WriteString(value)
 					tmp.WriteByte(',')
 				}
