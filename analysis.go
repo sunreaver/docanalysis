@@ -293,7 +293,6 @@ func (d *Document) pdf(opt *Options) (images []*Image, text string, err error) {
 func (d *Document) Analysis(opt *Options) (images []*Image, text string, err error) {
 	defer func() {
 		if e := recover(); e != nil {
-			var err error
 			switch e := e.(type) {
 			case error:
 				err = e
@@ -302,7 +301,7 @@ func (d *Document) Analysis(opt *Options) (images []*Image, text string, err err
 			}
 			stack := make([]byte, 1024*2)
 			length := runtime.Stack(stack, true)
-			err = fmt.Errorf("[%v] %v %v", "PANIC RECOVER", err, stack[:length])
+			err = fmt.Errorf("[%v] %v %v", "PANIC RECOVER", err, string(stack[:length]))
 		}
 	}()
 	if d == nil || d.File == nil || len(d.Name) == 0 {
