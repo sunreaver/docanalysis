@@ -2,7 +2,7 @@ module github.com/sunreaver/docanalysis
 
 go 1.12
 
-replace github.com/extrame/xls => github.com/sunreaver/xls v1.0.0
+replace github.com/extrame/xls => github.com/sunreaver/xls v1.0.1
 
 require (
 	code.sajari.com/docconv v1.1.0
