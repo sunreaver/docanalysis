@@ -11,16 +11,13 @@ import (
 	"strings"
 
 	"code.sajari.com/docconv"
-
-	"baliance.com/gooxml/common"
-	"baliance.com/gooxml/spreadsheet"
-
-	"baliance.com/gooxml/document"
-	"baliance.com/gooxml/presentation"
-
 	"github.com/extrame/xls"
 	"github.com/pixiv/go-libjpeg/jpeg"
 	pdf "github.com/unidoc/unidoc/pdf/model"
+	"github.com/unidoc/unioffice/common"
+	"github.com/unidoc/unioffice/document"
+	"github.com/unidoc/unioffice/presentation"
+	"github.com/unidoc/unioffice/spreadsheet"
 )
 
 // Document 文档
