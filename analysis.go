@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"os"
 	"path"
 	"runtime"
@@ -13,6 +12,7 @@ import (
 	"code.sajari.com/docconv"
 	"github.com/extrame/xls"
 	"github.com/pixiv/go-libjpeg/jpeg"
+	"github.com/sunreaver/logger/v3"
 	pdf "github.com/unidoc/unidoc/pdf/model"
 	"github.com/unidoc/unioffice/common"
 	"github.com/unidoc/unioffice/document"
@@ -25,7 +25,7 @@ type Document struct {
 	File *bytes.Reader
 	Name string
 	Size int64
-	Log  Logger
+	Log  logger.Logger
 }
 
 // Image Image
@@ -187,7 +187,7 @@ func (d *Document) pdf(opt *Options) (images []*Image, text string, err error) {
 		}
 		// 只有 image/text 读取全部出错，次函数才会返回error
 		if err != nil {
-			d.Log.Errorw("read_pdf_image", "err", err,
+			d.Log.Errorw()("read_pdf_image", "err", err,
 				"file", d.Name)
 			if e == nil {
 				// 文字读取ok，则不返回错误
@@ -195,7 +195,7 @@ func (d *Document) pdf(opt *Options) (images []*Image, text string, err error) {
 			}
 		}
 		if e != nil {
-			d.Log.Errorw("read_pdf_text", "err", e,
+			d.Log.Errorw()("read_pdf_text", "err", e,
 				"file", d.Name)
 		}
 	}()
@@ -309,12 +309,12 @@ func (d *Document) Analysis(opt *Options) (images []*Image, text string, err err
 	}
 	opt.Valid()
 	if d.Log == nil {
-		d.Log = defaultLogger
+		d.Log = logger.Empty
 	}
 
 	switch path.Ext(d.Name) {
 	case ".txt":
-		body, e := ioutil.ReadAll(d.File)
+		body, e := io.ReadAll(d.File)
 		if e != nil {
 			return nil, "", fmt.Errorf("read file err: %v", e)
 		}
